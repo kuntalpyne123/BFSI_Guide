@@ -88,8 +88,8 @@ with st.sidebar:
         else:
             api_key = st.text_input("Enter Gemini API Key", type="password")
         
-        model_choice = st.selectbox("Select Model:", ("Flash 2.0 (Fast)", "Pro 2.5 (Stable)"))
-        model_id = "gemini-2.0-flash-exp" if "Flash" in model_choice else "gemini-2.5-pro"
+        model_choice = st.selectbox("Select Model:", ("Flash 2.5 (Fast)", "Pro 2.5 (Stable)"))
+        model_id = "gemini-2.5-flash" if "Flash" in model_choice else "gemini-2.5-pro"
 
     # 2. OPENAI CONFIG
     elif provider == "OpenAI (ChatGPT)":
