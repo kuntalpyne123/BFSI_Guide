@@ -10,7 +10,7 @@
 8. Save the newly created gemini API key onto your system;s environment variables. (Crucial)
 
 ## App Usage:
-1. Open the app link - (https://bfsiguide.streamlit.app/)
+1. Open the app link - (https://nexfin.streamlit.app/)
 2. Paste your generated newly GEMINI API KEY or an existing one if you already have one.
 3. Choose your preferred gemini model.
 4. Go ahead use the App.
