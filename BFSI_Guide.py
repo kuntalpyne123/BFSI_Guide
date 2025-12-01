@@ -107,7 +107,7 @@ with st.sidebar:
     elif provider == "OpenAI (ChatGPT)":
         st.warning("⚠️ OpenAI does not support native Search Grounding in API. Results may be dated.")
         api_key = st.text_input("Enter OpenAI API Key", type="password")
-        model_id = st.selectbox("Select Model:", ("gpt-4o", "gpt-4o-mini", "gpt-4-turbo"))
+        model_id = st.selectbox("Select Model:", ("gpt-5-nano", "gpt-5-mini", "gpt-5"))
 
     # 3. ANTHROPIC CONFIG
     elif provider == "Anthropic (Claude)":
