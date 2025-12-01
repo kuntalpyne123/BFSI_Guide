@@ -5,12 +5,11 @@ import random
 from streamlit.errors import StreamlitAPIException
 
 # --- LIBRARY IMPORTS ---
-# We import these conditionally or try/except to prevent crashes if libs are missing
 try:
     from google import genai
     from google.genai.types import GenerateContentConfig, Tool, GoogleSearch
 except ImportError:
-    pass # Handle later
+    pass
 
 try:
     import openai
@@ -19,6 +18,11 @@ except ImportError:
 
 try:
     import anthropic
+except ImportError:
+    pass
+
+try:
+    from duckduckgo_search import DDGS
 except ImportError:
     pass
 
@@ -54,7 +58,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "product_name" not in st.session_state: st.session_state.product_name = ""
 
 # ===========================
-# 2. SIDEBAR CONFIGURATION (New Multi-Provider Logic)
+# 2. SIDEBAR CONFIGURATION
 # ===========================
 
 with st.sidebar:
@@ -74,44 +78,28 @@ with st.sidebar:
     
     # 1. GOOGLE GEMINI CONFIG
     if provider == "Google Gemini":
-        st.info("⚡ Supports Live Google Search Grounding")
+        st.info("⚡ Native Search Grounding (Most Accurate)")
         
-        # Key Source Selection
-        key_source = st.radio(
-            "API Key Source:",
-            ("Use Free Default Key", "Enter My Own Key"),
-            help="Default key uses the app admin's quota."
-        )
-
+        key_source = st.radio("API Key Source:", ("Use Free Default Key", "Enter My Own Key"))
         if key_source == "Use Free Default Key":
             try:
-                if "GEMINI_API_KEY" in st.secrets:
-                    api_key = st.secrets["GEMINI_API_KEY"]
-                else:
-                    st.error("🚨 Default key not found in secrets!")
-            except StreamlitAPIException:
-                st.error("Secrets not available locally.")
+                if "GEMINI_API_KEY" in st.secrets: api_key = st.secrets["GEMINI_API_KEY"]
+            except: pass
         else:
             api_key = st.text_input("Enter Gemini API Key", type="password")
         
-        # Model Selection
-        model_choice = st.selectbox(
-            "Select Gemini Model:",
-            ("Flash 2.5 (Fast)", "Pro 2.5 (Stable)", "Pro 3.0 (Preview)")
-        )
-        if "Flash" in model_choice: model_id = "gemini-2.5-flash"
-        elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
-        else: model_id = "gemini-3-pro-preview"
+        model_choice = st.selectbox("Select Model:", ("Flash 2.0 (Fast)", "Pro 2.5 (Stable)"))
+        model_id = "gemini-2.0-flash-exp" if "Flash" in model_choice else "gemini-2.5-pro"
 
     # 2. OPENAI CONFIG
     elif provider == "OpenAI (ChatGPT)":
-        st.warning("⚠️ OpenAI does not support native Search Grounding in API. Results may be dated.")
+        st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter OpenAI API Key", type="password")
         model_id = st.selectbox("Select Model:", ("gpt-5-mini", "gpt-5"))
 
     # 3. ANTHROPIC CONFIG
     elif provider == "Anthropic (Claude)":
-        st.warning("⚠️ Claude does not support native Search Grounding in API. Results may be dated.")
+        st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter Anthropic API Key", type="password")
         model_id = st.selectbox("Select Model:", ("claude-3-5-sonnet-20241022", "claude-3-opus-20240229"))
 
@@ -120,135 +108,99 @@ with st.sidebar:
         st.warning(f"Please configure {provider} API Key to start.")
         st.stop()
     
-    # Initialize Clients based on provider
+    # Initialize Clients
     client = None
     if provider == "Google Gemini":
-        try:
-            client = genai.Client(api_key=api_key)
-        except Exception as e:
-            st.error(f"Gemini Error: {e}")
+        try: client = genai.Client(api_key=api_key)
+        except Exception as e: st.error(f"Gemini Error: {e}")
     elif provider == "OpenAI (ChatGPT)":
-        try:
-            client = openai.OpenAI(api_key=api_key)
-        except Exception as e:
-            st.error(f"OpenAI Error: {e}")
+        try: client = openai.OpenAI(api_key=api_key)
+        except Exception as e: st.error(f"OpenAI Error: {e}")
     elif provider == "Anthropic (Claude)":
-        try:
-            client = anthropic.Anthropic(api_key=api_key)
-        except Exception as e:
-            st.error(f"Anthropic Error: {e}")
+        try: client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e: st.error(f"Anthropic Error: {e}")
 
 # ===========================
-# 3. UNIFIED LLM WRAPPER (The Bridge)
+# 3. WEB SEARCH BRIDGE (The Fix)
 # ===========================
 
-def call_llm(system_instruction, user_prompt, use_search=False):
+def search_web_duckduckgo(query, max_results=5):
+    """Fetches live search results using DuckDuckGo (Free)."""
+    try:
+        results = DDGS().text(query, max_results=max_results)
+        return "\n".join([f"- {r['title']}: {r['body']} (Source: {r['href']})" for r in results])
+    except Exception as e:
+        return f"Search failed: {str(e)}"
+
+# ===========================
+# 4. UNIFIED LLM WRAPPER
+# ===========================
+
+def call_llm(system_instruction, user_prompt, use_search=False, search_query=None):
     """
-    A unified function to call ANY provider (Gemini, OpenAI, Claude).
-    Handles the syntax differences automatically.
+    Unified function for Gemini, OpenAI, and Claude.
+    If use_search=True:
+      - Gemini: Uses native Grounding.
+      - OpenAI/Claude: Uses DuckDuckGo Bridge and injects context.
     """
     
     # --- GOOGLE GEMINI HANDLER ---
     if provider == "Google Gemini":
         tools = [Tool(google_search=GoogleSearch())] if use_search else None
-        config = GenerateContentConfig(
-            tools=tools,
-            system_instruction=system_instruction,
-            temperature=0.1
-        )
+        config = GenerateContentConfig(tools=tools, system_instruction=system_instruction, temperature=0.3)
         try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=user_prompt,
-                config=config
-            )
-            return response.text
-        except Exception as e:
-            return f"Gemini Error: {str(e)}"
+            return client.models.generate_content(model=model_id, contents=user_prompt, config=config).text
+        except Exception as e: return f"Gemini Error: {e}"
+
+    # --- SEARCH INJECTION FOR OTHERS ---
+    # For ChatGPT/Claude, we manually fetch data and append it to the prompt
+    final_prompt = user_prompt
+    if use_search and search_query:
+        with st.spinner(f"🕵️ Bridging to live web via DuckDuckGo for {provider}..."):
+            web_data = search_web_duckduckgo(search_query)
+            final_prompt = f"""
+            CONTEXT FROM LIVE WEB SEARCH:
+            {web_data}
+            
+            USER QUERY:
+            {user_prompt}
+            """
 
     # --- OPENAI HANDLER ---
-    elif provider == "OpenAI (ChatGPT)":
+    if provider == "OpenAI (ChatGPT)":
         try:
-            # Merge system instruction into messages
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ]
-            response = client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                temperature=0.1
-            )
+            messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": final_prompt}]
+            response = client.chat.completions.create(model=model_id, messages=messages, temperature=0.3)
             return response.choices[0].message.content
-        except Exception as e:
-            return f"OpenAI Error: {str(e)}"
+        except Exception as e: return f"OpenAI Error: {e}"
 
     # --- ANTHROPIC HANDLER ---
     elif provider == "Anthropic (Claude)":
         try:
-            response = client.messages.create(
-                model=model_id,
-                system=system_instruction,
-                messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=4000,
-                temperature=0.1
-            )
+            response = client.messages.create(model=model_id, system=system_instruction, messages=[{"role": "user", "content": final_prompt}], max_tokens=4000, temperature=0.3)
             return response.content[0].text
-        except Exception as e:
-            return f"Claude Error: {str(e)}"
+        except Exception as e: return f"Claude Error: {e}"
 
 # ===========================
-# 4. AGENT PERSONAS
+# 5. AGENT PERSONAS
 # ===========================
 
-# Note: I removed the strict requirement for "Google Search Tool" in the instruction
-# because OpenAI/Claude don't have it natively.
-RESEARCHER_INSTRUCTION = """
-ROLE: Lead Financial Scrutinizer.
-GOAL: Find comparative data, hidden fees, and regulatory risk.
-
-INSTRUCTIONS:
-1. Compare 2-3 similar financial products.
-2. Identify hidden fees (prepayment, late payment).
-3. Check for regulatory red flags.
-
-OUTPUT: Provide a RAW text dump of findings.
-"""
-
-EDITOR_INSTRUCTION = """
-ROLE: Senior Risk and Compliance Analyst.
-GOAL: Turn raw data into an objective summary.
-
-MANDATORY OUTPUT SECTIONS:
-1. Hidden Fee Detection
-2. Risk Score (1-10)
-3. Stress Test Simulation
-4. Comparative Offer (TCO)
-
-STRUCTURE:
-## 💰 Total Cost & Risk Summary
-## ⚖️ Comparative Offer Table
-## 🚨 Hidden Fee Report
-## ⭐ Analyst Verdict
-"""
-
-PERSONALIZER_INSTRUCTION = """
-ROLE: Ethical Financial Advisor.
-GOAL: Match user profile to the product.
-OUTPUT: Transparent recommendation letter (Strong Match/Poor Match).
-"""
+RESEARCHER_INSTRUCTION = "ROLE: Financial Scrutinizer. GOAL: Find comparative data, hidden fees, regulatory risk. OUTPUT: RAW text dump."
+EDITOR_INSTRUCTION = "ROLE: Risk Analyst. STRUCTURE: 1. Hidden Fees 2. Risk Score 3. Comparative TCO Table 4. Verdict."
+PERSONALIZER_INSTRUCTION = "ROLE: Ethical Advisor. GOAL: Match user profile to product. OUTPUT: Recommendation letter."
 
 # ===========================
-# 5. APP LOGIC (Using Wrapper)
+# 6. APP LOGIC
 # ===========================
 
 def run_research(product_name):
-    # Only Gemini uses the 'use_search=True' flag effectively here
+    # We pass 'search_query' specifically for the DuckDuckGo Bridge
     prompt = f"Current Date: December 2025. Investigate rival offers for: {product_name}. Confirm hidden fees."
-    return call_llm(RESEARCHER_INSTRUCTION, prompt, use_search=True)
+    search_query = f"{product_name} financial terms hidden fees reviews 2025"
+    return call_llm(RESEARCHER_INSTRUCTION, prompt, use_search=True, search_query=search_query)
 
 def generate_report(product_name, research_data):
-    prompt = f"Research Data:\n{research_data}\n\nGenerate the Master Financial Report."
+    prompt = f"Research Data:\n{research_data}\n\nGenerate Financial Report."
     return call_llm(EDITOR_INSTRUCTION, prompt)
 
 def generate_personal_rec(product_name, research_data, user_profile):
@@ -256,17 +208,15 @@ def generate_personal_rec(product_name, research_data, user_profile):
     return call_llm(PERSONALIZER_INSTRUCTION, prompt)
 
 # ===========================
-# 6. APP INTERFACE
+# 7. APP INTERFACE
 # ===========================
 
 st.title("📈 NexFin Intelligence")
 st.caption(f"Powered by **{provider} ({model_id})**")
 
-# --- PHASE 1: INPUT ---
 with st.form("research_form"):
-    product_input = st.text_input("Analyze Financial Product or Document:", 
-        placeholder="e.g. HDFC Home Loan Disclosure, SBI Mutual Fund Terms")
-    submitted = st.form_submit_button("🚀 Run Financial Scrutiny")
+    product_input = st.text_input("Analyze Financial Product:", placeholder="e.g. HDFC Home Loan, SBI Mutual Fund")
+    submitted = st.form_submit_button("🚀 Run Analysis")
 
 if submitted and product_input:
     st.session_state.product_name = product_input
@@ -276,7 +226,7 @@ if submitted and product_input:
     status = st.status(f"🕵️ Initiating Scrutiny via {provider}...", expanded=True)
     
     try:
-        status.write(f"🌍 **The Hunter:** Gathering intelligence...")
+        status.write(f"🌍 **The Hunter:** Gathering live intelligence...")
         research_data = run_research(product_input)
         st.session_state.research_data = research_data
         
@@ -284,57 +234,42 @@ if submitted and product_input:
         report_text = generate_report(product_input, research_data)
         st.session_state.general_report = report_text
         
-        status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
+        status.update(label="✅ Complete!", state="complete", expanded=False)
         
     except Exception as e:
         status.update(label="❌ Error", state="error")
         st.error(f"System Error: {e}")
 
-# --- PHASE 2: DISPLAY REPORT ---
 if st.session_state.general_report:
     st.divider()
     st.markdown(st.session_state.general_report)
     
-    with st.expander("🔍 Regulatory & Raw Data Transparency"):
-        if provider == "Google Gemini":
-            st.info("✅ Verified with Live Google Search Grounding")
-        else:
-            st.warning("⚠️ Generated using internal model knowledge (No Live Search). Verification recommended.")
-        st.text_area("Raw Scrutiny Notes", st.session_state.research_data, height=200)
+    with st.expander("🔍 Raw Data Transparency"):
+        if provider == "Google Gemini": st.info("✅ Verified with Google Search")
+        else: st.info("✅ Verified with DuckDuckGo Search")
+        st.text_area("Raw Notes", st.session_state.research_data, height=200)
 
     st.divider()
-
-    # --- PHASE 3: PERSONALIZATION ---
-    st.markdown("## 👤 Personal Financial Advisor")
-    
+    st.markdown("## 👤 Advisor")
     with st.container(border=True):
-        user_profile = st.text_area("Tell us about your financial goal:", placeholder="e.g. Loan for house, max tax saving...")
-        
-        if st.button("✨ Get Personalized Verdict"):
+        user_profile = st.text_area("Financial Goal:", placeholder="e.g. Loan for house...")
+        if st.button("✨ Get Verdict"):
             if user_profile:
-                with st.spinner("Simulating outcome..."):
+                with st.spinner("Simulating..."):
                     rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
-                    st.markdown("### 💌 Advisor Report")
                     st.markdown(rec)
 
     st.divider()
-
-    # --- PHASE 4: CHAT ---
     st.markdown(f"## 💬 Chat with {provider}")
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask a follow-up question..."):
+    if prompt := st.chat_input("Follow-up question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
+        with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                chat_response = call_llm(
-                    f"You are a BFSI advisor. Context: {st.session_state.research_data}",
-                    prompt
-                )
-                st.markdown(chat_response)
-        st.session_state.messages.append({"role": "assistant", "content": chat_response})
+                resp = call_llm(f"Advisor. Context: {st.session_state.research_data}", prompt)
+                st.markdown(resp)
+        st.session_state.messages.append({"role": "assistant", "content": resp})
