@@ -154,7 +154,7 @@ def call_llm(system_instruction, user_prompt, use_search=False):
         config = GenerateContentConfig(
             tools=tools,
             system_instruction=system_instruction,
-            temperature=0.3
+            temperature=0.1
         )
         try:
             response = client.models.generate_content(
@@ -177,7 +177,7 @@ def call_llm(system_instruction, user_prompt, use_search=False):
             response = client.chat.completions.create(
                 model=model_id,
                 messages=messages,
-                temperature=0.3
+                temperature=0.1
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -191,7 +191,7 @@ def call_llm(system_instruction, user_prompt, use_search=False):
                 system=system_instruction,
                 messages=[{"role": "user", "content": user_prompt}],
                 max_tokens=4000,
-                temperature=0.3
+                temperature=0.1
             )
             return response.content[0].text
         except Exception as e:
