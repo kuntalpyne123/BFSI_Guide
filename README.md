@@ -15,5 +15,7 @@
 3. Choose your preferred gemini model.
 4. Go ahead use the App.
 
+ Note: While saving the API key to your environment variable, follow the naming convention as: GEMINI_API_KEY for it work.
+
 
 Thank You.
