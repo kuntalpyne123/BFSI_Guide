@@ -67,13 +67,13 @@ with st.sidebar:
     st.markdown("**🤖 AI Engine**")
     model_choice = st.radio(
         "Select Model:",
-        ("Flash 2.0 (Fastest)", "Pro 2.5 (Stable)", "Pro 3.0 (Preview)"),
+        ("Flash 2.5 (Fastest)", "Pro 2.5 (Stable)", "Pro 3.0 (Preview)"),
         index=1, # Default to 2.5 Pro for best reliability/smartness balance
         help="Pro 2.5 is recommended for stable reasoning."
     )
 
-    if model_choice == "Flash 2.0 (Fastest)":
-        MODEL_ID = "gemini-2.0-flash-exp"
+    if model_choice == "Flash 2.5 (Fastest)":
+        MODEL_ID = "gemini-2.5-flash"
     elif model_choice == "Pro 2.5 (Stable)":
         MODEL_ID = "gemini-2.5-pro"
     else:
