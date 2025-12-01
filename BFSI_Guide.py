@@ -56,6 +56,11 @@ if "research_data" not in st.session_state: st.session_state.research_data = Non
 if "general_report" not in st.session_state: st.session_state.general_report = None
 if "messages" not in st.session_state: st.session_state.messages = []
 if "product_name" not in st.session_state: st.session_state.product_name = ""
+# NEW: Usage Counter for Rate Limiting
+if "usage_count" not in st.session_state: st.session_state.usage_count = 0
+
+# Rate Limit Constant
+FREE_USAGE_LIMIT = 5 
 
 # ===========================
 # 2. SIDEBAR CONFIGURATION
@@ -73,6 +78,7 @@ with st.sidebar:
 
     api_key = None
     model_id = None
+    using_free_key = False # Flag to track if we need to enforce limits
     
     # --- B. KEY MANAGEMENT ---
     
@@ -80,16 +86,41 @@ with st.sidebar:
     if provider == "Google Gemini":
         st.info("⚡ Native Search Grounding (Most Accurate)")
         
-        key_source = st.radio("API Key Source:", ("Use Free Default Key", "Enter My Own Key"))
+        key_source = st.radio(
+            "API Key Source:", 
+            ("Use Free Default Key", "Enter My Own Key"),
+            help="Default key is limited to 5 requests per session to prevent quota exhaustion."
+        )
+
         if key_source == "Use Free Default Key":
+            using_free_key = True # Enable Rate Limiting
+            
+            # Show Usage Progress
+            usage_left = FREE_USAGE_LIMIT - st.session_state.usage_count
+            st.progress(min(st.session_state.usage_count / FREE_USAGE_LIMIT, 1.0), 
+                        text=f"Free Quota: {st.session_state.usage_count}/{FREE_USAGE_LIMIT} used")
+            
+            if usage_left <= 0:
+                st.error("🚫 Session Quota Exceeded. Please enter your own API Key.")
+            
             try:
-                if "GEMINI_API_KEY" in st.secrets: api_key = st.secrets["GEMINI_API_KEY"]
-            except: pass
+                if "GEMINI_API_KEY" in st.secrets:
+                    api_key = st.secrets["GEMINI_API_KEY"]
+                else:
+                    st.error("🚨 Default key not found in secrets!")
+            except StreamlitAPIException:
+                st.error("Secrets not available locally.")
         else:
             api_key = st.text_input("Enter Gemini API Key", type="password")
         
-        model_choice = st.selectbox("Select Model:", ("Flash 2.5 (Fast)", "Pro 2.5 (Stable)"))
-        model_id = "gemini-2.5-flash" if "Flash" in model_choice else "gemini-2.5-pro"
+        # Model Selection
+        model_choice = st.selectbox(
+            "Select Gemini Model:",
+            ("Flash 2.5 (Fast)", "Pro 2.5 (Stable)", "Pro 3.0 (Preview)")
+        )
+        if "Flash" in model_choice: model_id = "gemini-2.5-flash"
+        elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
+        else: model_id = "gemini-3-pro-preview"
 
     # 2. OPENAI CONFIG
     elif provider == "OpenAI (ChatGPT)":
@@ -101,27 +132,24 @@ with st.sidebar:
     elif provider == "Anthropic (Claude)":
         st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter Anthropic API Key", type="password")
-        model_id = st.selectbox("Select Model:", ("claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101", "claude-opus-4-1-20250805"))
+        model_id = st.selectbox("Select Model:", ("claude-opus-4-1-20250805", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"))
 
     # --- C. INITIALIZATION ---
-    if not api_key:
-        st.warning(f"Please configure {provider} API Key to start.")
-        st.stop()
-    
-    # Initialize Clients
+    # We allow the app to load even without key, but block execution later
     client = None
-    if provider == "Google Gemini":
-        try: client = genai.Client(api_key=api_key)
-        except Exception as e: st.error(f"Gemini Error: {e}")
-    elif provider == "OpenAI (ChatGPT)":
-        try: client = openai.OpenAI(api_key=api_key)
-        except Exception as e: st.error(f"OpenAI Error: {e}")
-    elif provider == "Anthropic (Claude)":
-        try: client = anthropic.Anthropic(api_key=api_key)
-        except Exception as e: st.error(f"Anthropic Error: {e}")
+    if api_key:
+        if provider == "Google Gemini":
+            try: client = genai.Client(api_key=api_key)
+            except Exception as e: st.error(f"Gemini Error: {e}")
+        elif provider == "OpenAI (ChatGPT)":
+            try: client = openai.OpenAI(api_key=api_key)
+            except Exception as e: st.error(f"OpenAI Error: {e}")
+        elif provider == "Anthropic (Claude)":
+            try: client = anthropic.Anthropic(api_key=api_key)
+            except Exception as e: st.error(f"Anthropic Error: {e}")
 
 # ===========================
-# 3. WEB SEARCH BRIDGE (The Fix)
+# 3. WEB SEARCH BRIDGE
 # ===========================
 
 def search_web_duckduckgo(query, max_results=5):
@@ -137,13 +165,11 @@ def search_web_duckduckgo(query, max_results=5):
 # ===========================
 
 def call_llm(system_instruction, user_prompt, use_search=False, search_query=None):
-    """
-    Unified function for Gemini, OpenAI, and Claude.
-    If use_search=True:
-      - Gemini: Uses native Grounding.
-      - OpenAI/Claude: Uses DuckDuckGo Bridge and injects context.
-    """
+    """Unified function for Gemini, OpenAI, and Claude."""
     
+    if not client:
+        return "Error: Client not initialized. Check API Key."
+
     # --- GOOGLE GEMINI HANDLER ---
     if provider == "Google Gemini":
         tools = [Tool(google_search=GoogleSearch())] if use_search else None
@@ -153,18 +179,11 @@ def call_llm(system_instruction, user_prompt, use_search=False, search_query=Non
         except Exception as e: return f"Gemini Error: {e}"
 
     # --- SEARCH INJECTION FOR OTHERS ---
-    # For ChatGPT/Claude, we manually fetch data and append it to the prompt
     final_prompt = user_prompt
     if use_search and search_query:
         with st.spinner(f"🕵️ Bridging to live web via DuckDuckGo for {provider}..."):
             web_data = search_web_duckduckgo(search_query)
-            final_prompt = f"""
-            CONTEXT FROM LIVE WEB SEARCH:
-            {web_data}
-            
-            USER QUERY:
-            {user_prompt}
-            """
+            final_prompt = f"CONTEXT FROM LIVE WEB SEARCH:\n{web_data}\n\nUSER QUERY:\n{user_prompt}"
 
     # --- OPENAI HANDLER ---
     if provider == "OpenAI (ChatGPT)":
@@ -194,7 +213,6 @@ PERSONALIZER_INSTRUCTION = "ROLE: Ethical Advisor. GOAL: Match user profile to p
 # ===========================
 
 def run_research(product_name):
-    # We pass 'search_query' specifically for the DuckDuckGo Bridge
     prompt = f"Current Date: December 2025. Investigate rival offers for: {product_name}. Confirm hidden fees."
     search_query = f"{product_name} financial terms hidden fees reviews 2025"
     return call_llm(RESEARCHER_INSTRUCTION, prompt, use_search=True, search_query=search_query)
@@ -219,6 +237,17 @@ with st.form("research_form"):
     submitted = st.form_submit_button("🚀 Run Analysis")
 
 if submitted and product_input:
+    # --- RATE LIMIT CHECK ---
+    if using_free_key and st.session_state.usage_count >= FREE_USAGE_LIMIT:
+        st.error(f"🛑 Free Usage Limit Reached ({FREE_USAGE_LIMIT}/{FREE_USAGE_LIMIT}).")
+        st.warning("To continue using the app, please select 'Enter My Own Key' in the sidebar and provide your own Gemini API Key (it's free!).")
+        st.stop() # Halt execution
+    
+    # --- CHECK MISSING KEY ---
+    if not api_key:
+        st.error("🔑 API Key missing. Please configure settings in the sidebar.")
+        st.stop()
+
     st.session_state.product_name = product_input
     st.session_state.messages = [] 
     st.session_state.general_report = None 
@@ -233,6 +262,11 @@ if submitted and product_input:
         status.write("🧠 **The Analyst:** Calculating Risk & TCO...")
         report_text = generate_report(product_input, research_data)
         st.session_state.general_report = report_text
+        
+        # --- INCREMENT USAGE COUNTER (Only if successful) ---
+        if using_free_key:
+            st.session_state.usage_count += 1
+            st.toast(f"Free Quota Used: {st.session_state.usage_count}/{FREE_USAGE_LIMIT}")
         
         status.update(label="✅ Complete!", state="complete", expanded=False)
         
@@ -255,6 +289,8 @@ if st.session_state.general_report:
         user_profile = st.text_area("Financial Goal:", placeholder="e.g. Loan for house...")
         if st.button("✨ Get Verdict"):
             if user_profile:
+                # OPTIONAL: Apply rate limit to this button too if desired, 
+                # but usually the heavy lift is the research phase.
                 with st.spinner("Simulating..."):
                     rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
                     st.markdown(rec)
@@ -266,6 +302,8 @@ if st.session_state.general_report:
             st.markdown(message["content"])
 
     if prompt := st.chat_input("Follow-up question..."):
+        # Simple chat usually doesn't need strict limits as it's cheaper/faster, 
+        # but be aware it consumes quota too.
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
