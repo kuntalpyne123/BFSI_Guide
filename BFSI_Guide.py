@@ -233,7 +233,7 @@ if submitted and product_input:
     status = st.status("🕵️ Initiating Financial Scrutiny...", expanded=True)
 
     try:
-        status.write(f"🌍 **The Hunter:** Scouring for T&Cs and rival offers using {MODEL_ID}...")
+        status.write(f"🌍 **The Hunter:** Scouring for products, T&Cs and rival offers...")
         research_response = run_research(product_input)
         st.session_state.research_data = research_response.text
 
