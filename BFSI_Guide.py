@@ -173,7 +173,7 @@ def call_llm(system_instruction, user_prompt, use_search=False, search_query=Non
     # --- GOOGLE GEMINI HANDLER ---
     if provider == "Google Gemini":
         tools = [Tool(google_search=GoogleSearch())] if use_search else None
-        config = GenerateContentConfig(tools=tools, system_instruction=system_instruction, temperature=0.3)
+        config = GenerateContentConfig(tools=tools, system_instruction=system_instruction, temperature=0.1)
         try:
             return client.models.generate_content(model=model_id, contents=user_prompt, config=config).text
         except Exception as e: return f"Gemini Error: {e}"
@@ -189,7 +189,7 @@ def call_llm(system_instruction, user_prompt, use_search=False, search_query=Non
     if provider == "OpenAI (ChatGPT)":
         try:
             messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": final_prompt}]
-            response = client.chat.completions.create(model=model_id, messages=messages, temperature=0.3)
+            response = client.chat.completions.create(model=model_id, messages=messages, temperature=0.1)
             return response.choices[0].message.content
         except Exception as e: return f"OpenAI Error: {e}"
 
