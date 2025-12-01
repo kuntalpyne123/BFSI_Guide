@@ -77,7 +77,7 @@ with st.sidebar:
     elif model_choice == "Pro 2.5 (Stable)":
         MODEL_ID = "gemini-2.5-pro"
     else:
-        MODEL_ID = "gemini-2.5-pro"
+        MODEL_ID = "gemini-3-pro-preview"
 
     if not api_key:
         st.warning("⚠️ Please provide your Gemini API Key to proceed. You can enter it above or set it as an environment variable (GEMINI_API_KEY).")
@@ -216,8 +216,8 @@ def generate_personal_rec(product_name, research_data, user_profile):
 # 5. APP INTERFACE & FLOW
 # ===========================
 
-st.title("📈 Financial IQ: Agentic BFSI Analyst")
-st.caption(f"Powered by **{MODEL_ID}**. Zero Bias. Total Transparency.")
+st.title("📈 NexFin Intelligence")
+st.caption(f"Because You Deserve the Truth.")
 
 # --- PHASE 1: INPUT ---
 with st.form("research_form"):
@@ -233,11 +233,11 @@ if submitted and product_input:
     status = st.status("🕵️ Initiating Financial Scrutiny...", expanded=True)
 
     try:
-        status.write(f"🌍 **Agent 1:** Hunting for T&Cs and rival offers using {MODEL_ID}...")
+        status.write(f"🌍 **The Hunter:** Scouring for T&Cs and rival offers using {MODEL_ID}...")
         research_response = run_research(product_input)
         st.session_state.research_data = research_response.text
 
-        status.write("🧠 **Agent 2:** Analyzing Total Cost of Ownership and Regulatory Risk...")
+        status.write("🧠 **The Analyst:** Analyzing Total Cost of Ownership and Regulatory Risk...")
         report_text = generate_report(product_input, st.session_state.research_data)
         st.session_state.general_report = report_text
 
@@ -261,7 +261,7 @@ if st.session_state.general_report:
     st.divider()
 
     # --- PHASE 3: PERSONALIZATION ENGINE ---
-    st.markdown("## 👤 Phase 2: Personalized Financial Advice")
+    st.markdown("## 👤 Personal Financial Advisor")
 
     with st.container(border=True):
         user_profile = st.text_area(
