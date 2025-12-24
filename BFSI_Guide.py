@@ -1,7 +1,8 @@
-import gradio as gr
+import streamlit as st
 import os
 import time
 import random
+from streamlit.errors import StreamlitAPIException
 
 # --- LIBRARY IMPORTS ---
 try:
@@ -29,27 +30,126 @@ except ImportError:
 # 1. CONFIGURATION & SETUP
 # ===========================
 
-# Global state management
-class AppState:
-    def __init__(self):
-        self.research_data = None
-        self.general_report = None
-        self.messages = []
-        self.product_name = ""
-        self.usage_count = 0
-        self.client = None
-        self.provider = "Google Gemini"
-        self.model_id = "gemini-2.5-flash"
-        self.api_key = None
-        self.using_free_key = False
+st.set_page_config(page_title="Financial IQ: Multi-Engine Analyst", page_icon="📈", layout="wide")
 
-state = AppState()
+st.markdown("""
+<style>
+    .badge {
+        display: inline-block;
+        padding: 0.25em 0.6em;
+        font-size: 0.85em;
+        font-weight: 700;
+        line-height: 1;
+        text-align: center;
+        white-space: nowrap;
+        vertical-align: baseline;
+        border-radius: 0.25rem;
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    .report-box { border: 1px solid #ddd; padding: 20px; border-radius: 10px; background-color: #f9f9f9; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- SESSION STATE INITIALIZATION ---
+if "research_data" not in st.session_state: st.session_state.research_data = None
+if "general_report" not in st.session_state: st.session_state.general_report = None
+if "messages" not in st.session_state: st.session_state.messages = []
+if "product_name" not in st.session_state: st.session_state.product_name = ""
+# NEW: Usage Counter for Rate Limiting
+if "usage_count" not in st.session_state: st.session_state.usage_count = 0
 
 # Rate Limit Constant
-FREE_USAGE_LIMIT = 5
+FREE_USAGE_LIMIT = 5 
 
 # ===========================
-# 2. WEB SEARCH BRIDGE
+# 2. SIDEBAR CONFIGURATION
+# ===========================
+
+with st.sidebar:
+    st.header("⚙️ Engine Settings")
+
+    # --- A. PROVIDER SELECTION ---
+    provider = st.radio(
+        "Select AI Provider:",
+        ("Google Gemini", "OpenAI (ChatGPT)", "Anthropic (Claude)"),
+        index=0
+    )
+
+    api_key = None
+    model_id = None
+    using_free_key = False # Flag to track if we need to enforce limits
+    
+    # --- B. KEY MANAGEMENT ---
+    
+    # 1. GOOGLE GEMINI CONFIG
+    if provider == "Google Gemini":
+        st.info("⚡ Native Search Grounding (Most Accurate)")
+        
+        key_source = st.radio(
+            "API Key Source:", 
+            ("Use Free Default Key", "Enter My Own Key"),
+            help="Default key is limited to 5 requests per session to prevent quota exhaustion."
+        )
+
+        if key_source == "Use Free Default Key":
+            using_free_key = True # Enable Rate Limiting
+            
+            # Show Usage Progress
+            usage_left = FREE_USAGE_LIMIT - st.session_state.usage_count
+            st.progress(min(st.session_state.usage_count / FREE_USAGE_LIMIT, 1.0), 
+                        text=f"Free Quota: {st.session_state.usage_count}/{FREE_USAGE_LIMIT} used")
+            
+            if usage_left <= 0:
+                st.error("🚫 Session Quota Exceeded. Please enter your own API Key.")
+            
+            try:
+                if "GEMINI_API_KEY" in st.secrets:
+                    api_key = st.secrets["GEMINI_API_KEY"]
+                else:
+                    st.error("🚨 Default key not found in secrets!")
+            except StreamlitAPIException:
+                st.error("Secrets not available locally.")
+        else:
+            api_key = st.text_input("Enter Gemini API Key", type="password")
+        
+        # Model Selection
+        model_choice = st.selectbox(
+            "Select Gemini Model:",
+            ("2.5 Flash (Fast)", "2.5 Pro (Stable)", "3.0 Pro (Latest)")
+        )
+        if "Flash" in model_choice: model_id = "gemini-2.5-flash"
+        elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
+        else: model_id = "gemini-3-pro-preview"
+
+    # 2. OPENAI CONFIG
+    elif provider == "OpenAI (ChatGPT)":
+        st.info("🌐 Web Search enabled via DuckDuckGo")
+        api_key = st.text_input("Enter OpenAI API Key", type="password")
+        model_id = st.selectbox("Select Model:", ("gpt-5-mini", "gpt-5"))
+
+    # 3. ANTHROPIC CONFIG
+    elif provider == "Anthropic (Claude)":
+        st.info("🌐 Web Search enabled via DuckDuckGo")
+        api_key = st.text_input("Enter Anthropic API Key", type="password")
+        model_id = st.selectbox("Select Model:", ("claude-opus-4-1-20250805", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"))
+
+    # --- C. INITIALIZATION ---
+    # We allow the app to load even without key, but block execution later
+    client = None
+    if api_key:
+        if provider == "Google Gemini":
+            try: client = genai.Client(api_key=api_key)
+            except Exception as e: st.error(f"Gemini Error: {e}")
+        elif provider == "OpenAI (ChatGPT)":
+            try: client = openai.OpenAI(api_key=api_key)
+            except Exception as e: st.error(f"OpenAI Error: {e}")
+        elif provider == "Anthropic (Claude)":
+            try: client = anthropic.Anthropic(api_key=api_key)
+            except Exception as e: st.error(f"Anthropic Error: {e}")
+
+# ===========================
+# 3. WEB SEARCH BRIDGE
 # ===========================
 
 def search_web_duckduckgo(query, max_results=5):
@@ -61,46 +161,47 @@ def search_web_duckduckgo(query, max_results=5):
         return f"Search failed: {str(e)}"
 
 # ===========================
-# 3. UNIFIED LLM WRAPPER
+# 4. UNIFIED LLM WRAPPER
 # ===========================
 
 def call_llm(system_instruction, user_prompt, use_search=False, search_query=None):
     """Unified function for Gemini, OpenAI, and Claude."""
     
-    if not state.client:
+    if not client:
         return "Error: Client not initialized. Check API Key."
 
     # --- GOOGLE GEMINI HANDLER ---
-    if state.provider == "Google Gemini":
+    if provider == "Google Gemini":
         tools = [Tool(google_search=GoogleSearch())] if use_search else None
         config = GenerateContentConfig(tools=tools, system_instruction=system_instruction, temperature=0.1)
         try:
-            return state.client.models.generate_content(model=state.model_id, contents=user_prompt, config=config).text
+            return client.models.generate_content(model=model_id, contents=user_prompt, config=config).text
         except Exception as e: return f"Gemini Error: {e}"
 
     # --- SEARCH INJECTION FOR OTHERS ---
     final_prompt = user_prompt
     if use_search and search_query:
-        web_data = search_web_duckduckgo(search_query)
-        final_prompt = f"CONTEXT FROM LIVE WEB SEARCH:\n{web_data}\n\nUSER QUERY:\n{user_prompt}"
+        with st.spinner(f"🕵️ Bridging to live web via DuckDuckGo for {provider}..."):
+            web_data = search_web_duckduckgo(search_query)
+            final_prompt = f"CONTEXT FROM LIVE WEB SEARCH:\n{web_data}\n\nUSER QUERY:\n{user_prompt}"
 
     # --- OPENAI HANDLER ---
-    if state.provider == "OpenAI (ChatGPT)":
+    if provider == "OpenAI (ChatGPT)":
         try:
             messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": final_prompt}]
-            response = state.client.chat.completions.create(model=state.model_id, messages=messages, temperature=0.1)
+            response = client.chat.completions.create(model=model_id, messages=messages, temperature=0.1)
             return response.choices[0].message.content
         except Exception as e: return f"OpenAI Error: {e}"
 
     # --- ANTHROPIC HANDLER ---
-    elif state.provider == "Anthropic (Claude)":
+    elif provider == "Anthropic (Claude)":
         try:
-            response = state.client.messages.create(model=state.model_id, system=system_instruction, messages=[{"role": "user", "content": final_prompt}], max_tokens=4000, temperature=0.3)
+            response = client.messages.create(model=model_id, system=system_instruction, messages=[{"role": "user", "content": final_prompt}], max_tokens=4000, temperature=0.3)
             return response.content[0].text
         except Exception as e: return f"Claude Error: {e}"
 
 # ===========================
-# 4. AGENT PERSONAS
+# 5. AGENT PERSONAS
 # ===========================
 
 RESEARCHER_INSTRUCTION = "ROLE: Financial Scrutinizer. GOAL: Find comparative data, hidden fees, regulatory risk. OUTPUT: RAW text dump."
@@ -108,7 +209,7 @@ EDITOR_INSTRUCTION = "ROLE: Risk Analyst. STRUCTURE: 1. Hidden Fees 2. Risk Scor
 PERSONALIZER_INSTRUCTION = "ROLE: Ethical Advisor. GOAL: Match user profile to product. OUTPUT: Recommendation letter."
 
 # ===========================
-# 5. CORE FUNCTIONS
+# 6. APP LOGIC
 # ===========================
 
 def run_research(product_name):
@@ -125,271 +226,88 @@ def generate_personal_rec(product_name, research_data, user_profile):
     return call_llm(PERSONALIZER_INSTRUCTION, prompt)
 
 # ===========================
-# 6. GRADIO INTERFACE FUNCTIONS
+# 7. APP INTERFACE
 # ===========================
 
-def initialize_client(provider, key_source, api_key_input, model_choice):
-    """Initialize the API client based on provider selection."""
-    state.provider = provider
-    state.using_free_key = False
-    
-    # Handle API Key
-    if provider == "Google Gemini":
-        if key_source == "Use Free Default Key":
-            state.using_free_key = True
-            try:
-                state.api_key = os.getenv("GEMINI_API_KEY")  # For Hugging Face Spaces
-                if not state.api_key:
-                    return "Error: Default key not configured in environment."
-            except Exception as e:
-                return f"Error: {e}"
-        else:
-            state.api_key = api_key_input
-        
-        # Set model
-        if "Flash" in model_choice: state.model_id = "gemini-2.5-flash"
-        elif "2.5" in model_choice: state.model_id = "gemini-2.5-pro"
-        else: state.model_id = "gemini-3-pro-preview"
-        
-    elif provider == "OpenAI (ChatGPT)":
-        state.api_key = api_key_input
-        state.model_id = model_choice
-        
-    elif provider == "Anthropic (Claude)":
-        state.api_key = api_key_input
-        state.model_id = model_choice
-    
-    # Initialize client
-    if state.api_key:
-        try:
-            if provider == "Google Gemini":
-                state.client = genai.Client(api_key=state.api_key)
-            elif provider == "OpenAI (ChatGPT)":
-                state.client = openai.OpenAI(api_key=state.api_key)
-            elif provider == "Anthropic (Claude)":
-                state.client = anthropic.Anthropic(api_key=state.api_key)
-            return "✅ Client initialized successfully!"
-        except Exception as e:
-            return f"❌ Error: {e}"
-    return "⚠️ API Key required"
+st.title("📈 NexFin Intelligence")
+st.caption(f"Powered by **{provider} ({model_id})**")
 
-def run_analysis(product_input, provider, key_source, api_key_input, model_choice):
-    """Main analysis function."""
+with st.form("research_form"):
+    product_input = st.text_input("Analyze Financial Product:", placeholder="e.g. HDFC Home Loan, SBI Mutual Fund")
+    submitted = st.form_submit_button("🚀 Run Analysis")
+
+if submitted and product_input:
+    # --- RATE LIMIT CHECK ---
+    if using_free_key and st.session_state.usage_count >= FREE_USAGE_LIMIT:
+        st.error(f"🛑 Free Usage Limit Reached ({FREE_USAGE_LIMIT}/{FREE_USAGE_LIMIT}).")
+        st.warning("To continue using the app, please select 'Enter My Own Key' in the sidebar and provide your own Gemini API Key (it's free!).")
+        st.stop() # Halt execution
     
-    # Check rate limit
-    if state.using_free_key and state.usage_count >= FREE_USAGE_LIMIT:
-        return (
-            f"🛑 Free Usage Limit Reached ({FREE_USAGE_LIMIT}/{FREE_USAGE_LIMIT}).\n\n"
-            "To continue, please provide your own API key.",
-            "",
-            "",
-            gr.update(visible=False),
-            gr.update(visible=False)
-        )
+    # --- CHECK MISSING KEY ---
+    if not api_key:
+        st.error("🔑 API Key missing. Please configure settings in the sidebar.")
+        st.stop()
+
+    st.session_state.product_name = product_input
+    st.session_state.messages = [] 
+    st.session_state.general_report = None 
     
-    # Initialize client
-    init_result = initialize_client(provider, key_source, api_key_input, model_choice)
-    if "Error" in init_result or "required" in init_result:
-        return init_result, "", "", gr.update(visible=False), gr.update(visible=False)
-    
-    if not product_input:
-        return "⚠️ Please enter a financial product to analyze.", "", "", gr.update(visible=False), gr.update(visible=False)
-    
-    state.product_name = product_input
-    state.messages = []
+    status = st.status(f"🕵️ Initiating Scrutiny via {provider}...", expanded=True)
     
     try:
-        # Research Phase
-        status_msg = f"🌍 Gathering intelligence via {state.provider}..."
+        status.write(f"🌍 **The Hunter:** Gathering live intelligence...")
         research_data = run_research(product_input)
-        state.research_data = research_data
+        st.session_state.research_data = research_data
         
-        # Analysis Phase
-        status_msg += "\n🧠 Calculating Risk & TCO..."
+        status.write("🧠 **The Analyst:** Calculating Risk & TCO...")
         report_text = generate_report(product_input, research_data)
-        state.general_report = report_text
+        st.session_state.general_report = report_text
         
-        # Increment usage counter
-        if state.using_free_key:
-            state.usage_count += 1
+        # --- INCREMENT USAGE COUNTER (Only if successful) ---
+        if using_free_key:
+            st.session_state.usage_count += 1
+            st.toast(f"Free Quota Used: {st.session_state.usage_count}/{FREE_USAGE_LIMIT}")
         
-        search_note = "✅ Verified with Google Search" if state.provider == "Google Gemini" else "✅ Verified with DuckDuckGo Search"
-        
-        return (
-            f"✅ Analysis Complete!\n\nQuota Used: {state.usage_count}/{FREE_USAGE_LIMIT if state.using_free_key else '∞'}",
-            report_text,
-            f"{search_note}\n\n{research_data}",
-            gr.update(visible=True),
-            gr.update(visible=True)
-        )
+        status.update(label="✅ Complete!", state="complete", expanded=False)
         
     except Exception as e:
-        return f"❌ System Error: {e}", "", "", gr.update(visible=False), gr.update(visible=False)
+        status.update(label="❌ Error", state="error")
+        st.error(f"System Error: {e}")
 
-def get_personal_recommendation(user_profile):
-    """Generate personalized recommendation."""
-    if not state.general_report:
-        return "⚠️ Please run an analysis first."
+if st.session_state.general_report:
+    st.divider()
+    st.markdown(st.session_state.general_report)
     
-    if not user_profile:
-        return "⚠️ Please describe your financial goal."
-    
-    try:
-        rec = generate_personal_rec(state.product_name, state.research_data, user_profile)
-        return rec
-    except Exception as e:
-        return f"❌ Error: {e}"
+    with st.expander("🔍 Raw Data Transparency"):
+        if provider == "Google Gemini": st.info("✅ Verified with Google Search")
+        else: st.info("✅ Verified with DuckDuckGo Search")
+        st.text_area("Raw Notes", st.session_state.research_data, height=200)
 
-def chat_response(message, history):
-    """Handle chat interactions."""
-    if not state.research_data:
-        return "⚠️ Please run an analysis first to enable chat."
-    
-    try:
-        response = call_llm(f"Advisor. Context: {state.research_data}", message)
-        return response
-    except Exception as e:
-        return f"❌ Error: {e}"
+    st.divider()
+    st.markdown("## 👤 Advisor")
+    with st.container(border=True):
+        user_profile = st.text_area("Financial Goal:", placeholder="e.g. Loan for house...")
+        if st.button("✨ Get Verdict"):
+            if user_profile:
+                # OPTIONAL: Apply rate limit to this button too if desired, 
+                # but usually the heavy lift is the research phase.
+                with st.spinner("Simulating..."):
+                    rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
+                    st.markdown(rec)
 
-# ===========================
-# 7. GRADIO APP INTERFACE
-# ===========================
+    st.divider()
+    st.markdown(f"## 💬 Chat with {provider}")
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-with gr.Blocks(title="Financial IQ: Multi-Engine Analyst", theme=gr.themes.Soft()) as app:
-    
-    gr.Markdown("# 📈 NexFin Intelligence")
-    gr.Markdown("*Multi-Engine Financial Product Analyzer with Live Web Intelligence*")
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("## ⚙️ Engine Settings")
-            
-            provider = gr.Radio(
-                choices=["Google Gemini", "OpenAI (ChatGPT)", "Anthropic (Claude)"],
-                value="Google Gemini",
-                label="Select AI Provider"
-            )
-            
-            # Gemini Options
-            key_source = gr.Radio(
-                choices=["Use Free Default Key", "Enter My Own Key"],
-                value="Use Free Default Key",
-                label="API Key Source",
-                visible=True
-            )
-            
-            api_key_input = gr.Textbox(
-                label="API Key",
-                type="password",
-                visible=False
-            )
-            
-            gemini_model = gr.Dropdown(
-                choices=["2.5 Flash (Fast)", "2.5 Pro (Stable)", "3.0 Pro (Latest)"],
-                value="2.5 Flash (Fast)",
-                label="Gemini Model",
-                visible=True
-            )
-            
-            openai_model = gr.Dropdown(
-                choices=["gpt-5-mini", "gpt-5"],
-                value="gpt-5-mini",
-                label="OpenAI Model",
-                visible=False
-            )
-            
-            claude_model = gr.Dropdown(
-                choices=["claude-opus-4-1-20250805", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"],
-                value="claude-opus-4-1-20250805",
-                label="Claude Model",
-                visible=False
-            )
-            
-            def update_provider_ui(provider_choice):
-                if provider_choice == "Google Gemini":
-                    return (
-                        gr.update(visible=True), gr.update(visible=False),
-                        gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
-                    )
-                else:
-                    return (
-                        gr.update(visible=False), gr.update(visible=True),
-                        gr.update(visible=False),
-                        gr.update(visible=True) if provider_choice == "OpenAI (ChatGPT)" else gr.update(visible=False),
-                        gr.update(visible=True) if provider_choice == "Anthropic (Claude)" else gr.update(visible=False)
-                    )
-            
-            provider.change(
-                update_provider_ui,
-                inputs=[provider],
-                outputs=[key_source, api_key_input, gemini_model, openai_model, claude_model]
-            )
-            
-            def update_key_visibility(choice):
-                return gr.update(visible=(choice == "Enter My Own Key"))
-            
-            key_source.change(update_key_visibility, inputs=[key_source], outputs=[api_key_input])
-        
-        with gr.Column(scale=2):
-            gr.Markdown("## 🔍 Product Analysis")
-            
-            product_input = gr.Textbox(
-                label="Financial Product to Analyze",
-                placeholder="e.g. HDFC Home Loan, SBI Mutual Fund",
-                lines=1
-            )
-            
-            analyze_btn = gr.Button("🚀 Run Analysis", variant="primary", size="lg")
-            
-            status_output = gr.Textbox(label="Status", lines=3, interactive=False)
-            
-            report_output = gr.Markdown(label="Analysis Report", visible=True)
-            
-            with gr.Accordion("🔍 Raw Data Transparency", open=False):
-                raw_data_output = gr.Textbox(label="Research Notes", lines=8, interactive=False)
-    
-    with gr.Row(visible=False) as advisor_row:
-        with gr.Column():
-            gr.Markdown("## 👤 Personal Advisor")
-            user_profile = gr.Textbox(
-                label="Your Financial Goal",
-                placeholder="e.g. Loan for house purchase, long-term retirement savings...",
-                lines=3
-            )
-            rec_btn = gr.Button("✨ Get Personalized Verdict")
-            recommendation_output = gr.Markdown()
-    
-    with gr.Row(visible=False) as chat_row:
-        with gr.Column():
-            gr.Markdown("## 💬 Chat with AI Advisor")
-            chatbot = gr.Chatbot(height=400)
-            chat_input = gr.Textbox(label="Ask a follow-up question", placeholder="e.g. How does this compare to...")
-            chat_input.submit(chat_response, inputs=[chat_input, chatbot], outputs=[chatbot])
-    
-    # Wire up the analysis button
-    model_selector = gr.State()
-    
-    def get_current_model(provider, gemini_m, openai_m, claude_m):
-        if provider == "Google Gemini": return gemini_m
-        elif provider == "OpenAI (ChatGPT)": return openai_m
-        else: return claude_m
-    
-    analyze_btn.click(
-        lambda p, g, o, c: get_current_model(p, g, o, c),
-        inputs=[provider, gemini_model, openai_model, claude_model],
-        outputs=[model_selector]
-    ).then(
-        run_analysis,
-        inputs=[product_input, provider, key_source, api_key_input, model_selector],
-        outputs=[status_output, report_output, raw_data_output, advisor_row, chat_row]
-    )
-    
-    rec_btn.click(
-        get_personal_recommendation,
-        inputs=[user_profile],
-        outputs=[recommendation_output]
-    )
-
-# Launch the app
-if __name__ == "__main__":
-    app.launch()
+    if prompt := st.chat_input("Follow-up question..."):
+        # Simple chat usually doesn't need strict limits as it's cheaper/faster, 
+        # but be aware it consumes quota too.
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                resp = call_llm(f"Advisor. Context: {st.session_state.research_data}", prompt)
+                st.markdown(resp)
+        st.session_state.messages.append({"role": "assistant", "content": resp})
