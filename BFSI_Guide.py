@@ -135,7 +135,7 @@ with st.sidebar:
         api_key = st.text_input("Enter Anthropic API Key", type="password")
         
         # --- MODIFICATION 2: SHORT NAMES FOR CLAUDE ---
-        claude_models = {
+        anthropic_models = {
             "Opus 4.5": "claude-opus-4-5-20251101",
             "Haiku 4.5": "claude-haiku-4-5-20251001",
             "Sonnet 4.5": "claude-sonnet-4-5-20250929"
