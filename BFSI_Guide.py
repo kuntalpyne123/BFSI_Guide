@@ -120,20 +120,26 @@ with st.sidebar:
         )
         if "Flash" in model_choice: model_id = "gemini-2.5-flash"
         elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
-        else: model_id = "gemini-3-pro-preview"
+        elif "3 Flash" in model_choice: model_id = "gemini-2.5-flash" # Fallback mapping
+        else: model_id = "gemini-3.0-pro-preview"
 
     # 2. OPENAI CONFIG
     elif provider == "OpenAI (ChatGPT)":
         st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter OpenAI API Key", type="password")
-        model_id = st.selectbox("Select Model:", ("gpt-5-mini", "gpt-5"))
+        model_id = st.selectbox("Select Model:", ("gpt-5.2-pro","gpt-5.2", "gpt-5-mini", "gpt-5"))
 
     # 3. ANTHROPIC CONFIG
     elif provider == "Anthropic (Claude)":
         st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter Anthropic API Key", type="password")
-        model_id = st.selectbox("Select Model:", ("claude-opus-4-1-20250805", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"))
-
+        
+        # --- MODIFICATION 2: SHORT NAMES FOR CLAUDE ---
+        claude_models = {
+            "Opus 4.5": "claude-opus-4-5-20251101",
+            "Haiku 4.5": "claude-haiku-4-5-20251001",
+            "Sonnet 4.5": "claude-sonnet-4-5-20250929"
+        }
     # --- C. INITIALIZATION ---
     # We allow the app to load even without key, but block execution later
     client = None
