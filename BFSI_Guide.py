@@ -134,12 +134,14 @@ with st.sidebar:
         st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter Anthropic API Key", type="password")
         
-        # --- MODIFICATION 2: SHORT NAMES FOR CLAUDE ---
         anthropic_models = {
-            "Opus 4.5": "claude-opus-4-5-20251101",
+            "Sonnet 4.5": "claude-sonnet-4-5-20250929",
             "Haiku 4.5": "claude-haiku-4-5-20251001",
-            "Sonnet 4.5": "claude-sonnet-4-5-20250929"
+            "Opus 4.5": "claude-opus-4-5-20251101"
         }
+        
+        selected_display_name = st.selectbox("Select Model:", list(anthropic_models.keys()))
+        model_id = anthropic_models[selected_display_name]
     # --- C. INITIALIZATION ---
     # We allow the app to load even without key, but block execution later
     client = None
