@@ -279,4 +279,4 @@ if st.session_state.general_report:
         if st.button("✨ Get Verdict"):
             if user_profile:
                 with st.spinner("Simulating..."):
-                    rec = generate_personal_rec(st.session_state.product_name, st.)
+                    rec = generate_personal_rec(st.session_state.product_name)
