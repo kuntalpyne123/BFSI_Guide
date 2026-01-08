@@ -111,12 +111,12 @@ with st.sidebar:
         
         model_choice = st.selectbox(
             "Select Gemini Model:",
-            ("2.5 Flash (Fast)", "2.5 Pro (Stable)", "3.0 Pro (Latest)")
+            ("2.5 Flash (Fast)", "2.5 Pro (Stable)", "3 Pro (Latest)")
         )
         if "Flash" in model_choice: model_id = "gemini-2.5-flash"
         elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
-        elif "3 Flash" in model_choice: model_id = "gemini-2.5-flash" 
-        else: model_id = "gemini-3.0-pro-preview"
+        elif "3 Flash" in model_choice: model_id = "gemini-3-flash-preview" 
+        else: model_id = "gemini-3-pro-preview"
 
     elif provider == "OpenAI (ChatGPT)":
         st.info("🌐 Web Search enabled via DuckDuckGo")
