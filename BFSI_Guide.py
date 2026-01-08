@@ -279,4 +279,20 @@ if st.session_state.general_report:
         if st.button("✨ Get Verdict"):
             if user_profile:
                 with st.spinner("Simulating..."):
-                    rec = generate_personal_rec(st.session_state.product_name)
+                    rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
+                    st.markdown(rec)
+
+    st.divider()
+    st.markdown(f"## 💬 Chat with {provider}")
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Follow-up question..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                resp = call_llm(f"Advisor. Context: {st.session_state.research_data}", prompt)
+                st.markdown(resp)
+        st.session_state.messages.append({"role": "assistant", "content": resp})
