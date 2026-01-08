@@ -56,8 +56,8 @@ if "research_data" not in st.session_state: st.session_state.research_data = Non
 if "general_report" not in st.session_state: st.session_state.general_report = None
 if "messages" not in st.session_state: st.session_state.messages = []
 if "product_name" not in st.session_state: st.session_state.product_name = ""
-# NEW: Usage Counter for Rate Limiting
 if "usage_count" not in st.session_state: st.session_state.usage_count = 0
+if "client" not in st.session_state: st.session_state.client = None # FIXED: Init client in state
 
 # Rate Limit Constant
 FREE_USAGE_LIMIT = 5 
@@ -78,7 +78,7 @@ with st.sidebar:
 
     api_key = None
     model_id = None
-    using_free_key = False # Flag to track if we need to enforce limits
+    using_free_key = False 
     
     # --- B. KEY MANAGEMENT ---
     
@@ -93,7 +93,7 @@ with st.sidebar:
         )
 
         if key_source == "Use Free Default Key":
-            using_free_key = True # Enable Rate Limiting
+            using_free_key = True 
             
             # Show Usage Progress
             usage_left = FREE_USAGE_LIMIT - st.session_state.usage_count
@@ -120,14 +120,14 @@ with st.sidebar:
         )
         if "Flash" in model_choice: model_id = "gemini-2.5-flash"
         elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
-        elif "3 Flash" in model_choice: model_id = "gemini-2.5-flash" # Fallback mapping
+        elif "3 Flash" in model_choice: model_id = "gemini-2.5-flash" 
         else: model_id = "gemini-3.0-pro-preview"
 
     # 2. OPENAI CONFIG
     elif provider == "OpenAI (ChatGPT)":
         st.info("🌐 Web Search enabled via DuckDuckGo")
         api_key = st.text_input("Enter OpenAI API Key", type="password")
-        model_id = st.selectbox("Select Model:", ("gpt-5.2-pro","gpt-5.2", "gpt-5-mini", "gpt-5"))
+        model_id = st.selectbox("Select Model:", ("gpt-4-turbo","gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"))
 
     # 3. ANTHROPIC CONFIG
     elif provider == "Anthropic (Claude)":
@@ -135,25 +135,30 @@ with st.sidebar:
         api_key = st.text_input("Enter Anthropic API Key", type="password")
         
         anthropic_models = {
-            "Sonnet 4.5": "claude-sonnet-4-5-20250929",
-            "Haiku 4.5": "claude-haiku-4-5-20251001",
-            "Opus 4.5": "claude-opus-4-5-20251101"
+            "Sonnet 3.5": "claude-3-5-sonnet-20240620",
+            "Haiku 3": "claude-3-haiku-20240307",
+            "Opus 3": "claude-3-opus-20240229"
         }
         
         selected_display_name = st.selectbox("Select Model:", list(anthropic_models.keys()))
         model_id = anthropic_models[selected_display_name]
-    # --- C. INITIALIZATION ---
-    # We allow the app to load even without key, but block execution later
-    client = None
+
+    # --- C. INITIALIZATION (FIXED) ---
     if api_key:
+        api_key = api_key.strip() # FIXED: Strip whitespace to prevent "Invalid Key" error
+        
         if provider == "Google Gemini":
-            try: client = genai.Client(api_key=api_key)
+            try: 
+                # Save to session state so it persists
+                st.session_state.client = genai.Client(api_key=api_key)
             except Exception as e: st.error(f"Gemini Error: {e}")
         elif provider == "OpenAI (ChatGPT)":
-            try: client = openai.OpenAI(api_key=api_key)
+            try: 
+                st.session_state.client = openai.OpenAI(api_key=api_key)
             except Exception as e: st.error(f"OpenAI Error: {e}")
         elif provider == "Anthropic (Claude)":
-            try: client = anthropic.Anthropic(api_key=api_key)
+            try: 
+                st.session_state.client = anthropic.Anthropic(api_key=api_key)
             except Exception as e: st.error(f"Anthropic Error: {e}")
 
 # ===========================
@@ -169,11 +174,14 @@ def search_web_duckduckgo(query, max_results=5):
         return f"Search failed: {str(e)}"
 
 # ===========================
-# 4. UNIFIED LLM WRAPPER
+# 4. UNIFIED LLM WRAPPER (FIXED)
 # ===========================
 
 def call_llm(system_instruction, user_prompt, use_search=False, search_query=None):
     """Unified function for Gemini, OpenAI, and Claude."""
+    
+    # FIXED: Retrieve client from session state
+    client = st.session_state.get("client")
     
     if not client:
         return "Error: Client not initialized. Check API Key."
@@ -249,7 +257,7 @@ if submitted and product_input:
     if using_free_key and st.session_state.usage_count >= FREE_USAGE_LIMIT:
         st.error(f"🛑 Free Usage Limit Reached ({FREE_USAGE_LIMIT}/{FREE_USAGE_LIMIT}).")
         st.warning("To continue using the app, please select 'Enter My Own Key' in the sidebar and provide your own Gemini API Key (it's free!).")
-        st.stop() # Halt execution
+        st.stop() 
     
     # --- CHECK MISSING KEY ---
     if not api_key:
@@ -265,57 +273,4 @@ if submitted and product_input:
     try:
         status.write(f"🌍 **The Hunter:** Gathering live intelligence...")
         research_data = run_research(product_input)
-        st.session_state.research_data = research_data
-        
-        status.write("🧠 **The Analyst:** Calculating Risk & TCO...")
-        report_text = generate_report(product_input, research_data)
-        st.session_state.general_report = report_text
-        
-        # --- INCREMENT USAGE COUNTER (Only if successful) ---
-        if using_free_key:
-            st.session_state.usage_count += 1
-            st.toast(f"Free Quota Used: {st.session_state.usage_count}/{FREE_USAGE_LIMIT}")
-        
-        status.update(label="✅ Complete!", state="complete", expanded=False)
-        
-    except Exception as e:
-        status.update(label="❌ Error", state="error")
-        st.error(f"System Error: {e}")
-
-if st.session_state.general_report:
-    st.divider()
-    st.markdown(st.session_state.general_report)
-    
-    with st.expander("🔍 Raw Data Transparency"):
-        if provider == "Google Gemini": st.info("✅ Verified with Google Search")
-        else: st.info("✅ Verified with DuckDuckGo Search")
-        st.text_area("Raw Notes", st.session_state.research_data, height=200)
-
-    st.divider()
-    st.markdown("## 👤 Advisor")
-    with st.container(border=True):
-        user_profile = st.text_area("Financial Goal:", placeholder="e.g. Loan for house...")
-        if st.button("✨ Get Verdict"):
-            if user_profile:
-                # OPTIONAL: Apply rate limit to this button too if desired, 
-                # but usually the heavy lift is the research phase.
-                with st.spinner("Simulating..."):
-                    rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
-                    st.markdown(rec)
-
-    st.divider()
-    st.markdown(f"## 💬 Chat with {provider}")
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("Follow-up question..."):
-        # Simple chat usually doesn't need strict limits as it's cheaper/faster, 
-        # but be aware it consumes quota too.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                resp = call_llm(f"Advisor. Context: {st.session_state.research_data}", prompt)
-                st.markdown(resp)
-        st.session_state.messages.append({"role": "assistant", "content": resp})
+        st.session_state.research_data
