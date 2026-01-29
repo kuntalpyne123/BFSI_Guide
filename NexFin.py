@@ -113,8 +113,8 @@ with st.sidebar:
             "Select Gemini Model:",
             ("2.5 Flash", "3 Flash")
         )
-        if "Flash" in model_choice: model_id = "gemini-2.5-flash"
-        elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
+        if "2.5 Flash" in model_choice: model_id = "gemini-2.5-flash"
+        elif "2.5 Pro" in model_choice: model_id = "gemini-2.5-pro"
         elif "3 Flash" in model_choice: model_id = "gemini-3-flash-preview" 
         else: model_id = "gemini-3-pro-preview"
 
