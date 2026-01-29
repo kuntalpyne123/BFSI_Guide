@@ -111,7 +111,7 @@ with st.sidebar:
         
         model_choice = st.selectbox(
             "Select Gemini Model:",
-            ("2.5 Flash (Fast)", "2.5 Pro (Stable)", "3 Pro (Latest)")
+            ("2.5 Flash", "3 Flash")
         )
         if "Flash" in model_choice: model_id = "gemini-2.5-flash"
         elif "2.5" in model_choice: model_id = "gemini-2.5-pro"
