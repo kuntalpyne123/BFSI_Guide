@@ -320,7 +320,7 @@ st.caption(f"Powered by **{provider} ({model_id})**")
 
 with st.form("research_form"):
     product_input = st.text_input("Analyze Financial Product:", placeholder="e.g. HDFC Home Loan, SBI Mutual Fund")
-    submitted = st.form_submit_button("🚀 Run Analysis")
+    submitted = st.form_submit_button("▶️ Run Analysis")
 
 if submitted and product_input:
     if using_free_key and st.session_state.usage_count >= FREE_USAGE_LIMIT:
@@ -343,7 +343,7 @@ if submitted and product_input:
         research_data = run_research(product_input)
         st.session_state.research_data = research_data
         
-        status.write("🧠 **The Analyst:** Calculating Risk & TCO...")
+        status.write("🧠 **The Analyst:** Analysing Product type and risks...")
         report_text = generate_report(product_input, research_data)
         st.session_state.general_report = report_text
         
@@ -367,10 +367,10 @@ if st.session_state.general_report:
         st.text_area("Raw Notes", st.session_state.research_data, height=200)
 
     st.divider()
-    st.markdown("## 👤 Advisor")
+    st.markdown("## 👨‍💼 Personal Advisor")
     with st.container(border=True):
         user_profile = st.text_area("Financial Goal:", placeholder="e.g. Loan for house...")
-        if st.button("✨ Get Verdict"):
+        if st.button("✨ Get Your Verdict"):
             if user_profile:
                 with st.spinner("Simulating..."):
                     rec = generate_personal_rec(st.session_state.product_name, st.session_state.research_data, user_profile)
