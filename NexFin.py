@@ -165,14 +165,15 @@ def search_web_duckduckgo(query, max_results=5):
 
 def call_llm(system_instruction, user_prompt, use_search=False, search_query=None):
     client = st.session_state.get("client")
-    if not client: return "Error: Client not initialized. Check API Key."
+    if not client: raise Exception("Error: Client not initialized. Check API Key.")
 
     if provider == "Google Gemini":
         tools = [Tool(google_search=GoogleSearch())] if use_search else None
         config = GenerateContentConfig(tools=tools, system_instruction=system_instruction, temperature=0.1)
         try:
             return client.models.generate_content(model=model_id, contents=user_prompt, config=config).text
-        except Exception as e: return f"Gemini Error: {e}"
+        except Exception as e: 
+            raise Exception(f"Gemini API Error: {e}")
 
     final_prompt = user_prompt
     if use_search and search_query:
@@ -185,13 +186,15 @@ def call_llm(system_instruction, user_prompt, use_search=False, search_query=Non
             messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": final_prompt}]
             response = client.chat.completions.create(model=model_id, messages=messages, temperature=0.1)
             return response.choices[0].message.content
-        except Exception as e: return f"OpenAI Error: {e}"
+        except Exception as e: 
+            raise Exception(f"OpenAI API Error: {e}")
 
     elif provider == "Anthropic (Claude)":
         try:
             response = client.messages.create(model=model_id, system=system_instruction, messages=[{"role": "user", "content": final_prompt}], max_tokens=4000, temperature=0.3)
             return response.content[0].text
-        except Exception as e: return f"Claude Error: {e}"
+        except Exception as e: 
+            raise Exception(f"Claude API Error: {e}")
 
 # ===========================
 # 5. AGENT PERSONAS
@@ -241,6 +244,7 @@ if submitted and product_input:
     st.session_state.product_name = product_input
     st.session_state.messages = [] 
     st.session_state.general_report = None 
+    st.session_state.research_data = None # Added to clear previous failed run data
     
     status = st.status(f"🕵️ Initiating Scrutiny via {provider}...", expanded=True)
     
@@ -260,7 +264,7 @@ if submitted and product_input:
         status.update(label="✅ Complete!", state="complete", expanded=False)
         
     except Exception as e:
-        status.update(label="❌ Error", state="error")
+        status.update(label="❌ Analysis Failed", state="error")
         st.error(f"System Error: {e}")
 
 if st.session_state.general_report:
