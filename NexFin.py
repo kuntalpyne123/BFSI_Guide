@@ -200,25 +200,115 @@ def call_llm(system_instruction, user_prompt, use_search=False, search_query=Non
 # 5. AGENT PERSONAS
 # ===========================
 
-RESEARCHER_INSTRUCTION = "ROLE: Financial Scrutinizer. GOAL: Find comparative data, hidden fees, regulatory risk. OUTPUT: RAW text dump."
-EDITOR_INSTRUCTION = "ROLE: Risk Analyst. STRUCTURE: 1. Hidden Fees 2. Risk Score 3. Comparative TCO Table 4. Verdict."
-PERSONALIZER_INSTRUCTION = "ROLE: Ethical Advisor. GOAL: Match user profile to product. OUTPUT: Recommendation letter."
+RESEARCHER_INSTRUCTION = """
+ROLE: Senior Quantitative Forensic Analyst.
+GOAL: Compile an exhaustive, heavily researched, and data-dense intelligence dossier on the requested financial product. 
+MANDATE: You must adapt your data gathering to the specific asset class. Do not summarize; extract raw, hard facts, numbers, and direct terms.
+
+CORE INTELLIGENCE REQUIREMENTS:
+1. Asset Classification & Mechanics: Identify exactly what this product is (e.g., Equity, Derivative, Debt instrument, Consumer Loan, Mutual Fund). How does it actually work?
+2. The "Hidden" Cost Forensics: 
+   - For Credit/Loans: Find exact APRs, origination fees, prepayment penalties, and late fees.
+   - For Equities/Funds: Find Expense Ratios (TER), 12b-1 fees, bid-ask spreads, and commission structures.
+   - For Derivatives: Look for margin requirements, carrying costs, and theta decay implications.
+3. Risk & Regulatory Exposure: What are the macro/micro risks? (e.g., interest rate sensitivity, liquidity risk, counterparty risk). Are there any recent SEC, FINRA, or global regulatory actions/warnings related to this specific product or its issuer?
+4. Comparative Benchmarking: Identify 2-3 direct market competitors or alternative indexes. What are their comparative yields, costs, or performance metrics?
+
+OUTPUT FORMAT: A highly structured, dense RAW TEXT DUMP organized by the categories above. Prioritize numbers, percentages, and factual clauses over narrative text.
+"""
+EDITOR_INSTRUCTION = """
+ROLE: Chief Risk Officer (CRO) & Lead Financial Architect.
+GOAL: Synthesize raw intelligence into a massive, institutional-grade Financial Impact & Risk Report.
+TONE: Authoritative, objective, ruthlessly analytical, and completely devoid of marketing fluff. 
+
+STRICT REPORT STRUCTURE:
+## 1. Executive Synopsis
+(Provide a high-level, definitive breakdown of the product, its primary use case, and its core value proposition.)
+
+## 2. Structural Mechanics & Fee Forensics
+(Detail exactly how this product makes money for the issuer and costs money for the user. Expose all hidden fees, spreads, expense ratios, or penalties identified in the data.)
+
+## 3. The Risk Matrix
+(Categorize and explain the specific risks. Dynamically adapt this to the asset:
+- Market/Volatility Risk
+- Liquidity Risk (Can you exit easily?)
+- Credit/Counterparty Risk
+- Regulatory/Macro Risk)
+
+## 4. Competitive Alternative Benchmark
+(Create a Markdown Table comparing this product against 2-3 direct alternatives identified in the research. Compare on Cost, Risk Level, and Potential Yield/Benefit.)
+
+## 5. The CRO Verdict
+(A definitive, brutal assessment of the product's overall quality and systemic risk. Provide a Risk Score out of 100 with a strict justification.)
+"""
+PERSONALIZER_INSTRUCTION = """
+ROLE: Fiduciary Wealth Manager & Strict Ethical Advisor.
+GOAL: Cross-reference the complex product report with the User's specific profile, goals, and risk tolerance to determine absolute suitability.
+TONE: Highly empathetic but uncompromising on financial safety. You speak directly to the user ("You").
+
+INSTRUCTIONS:
+Do not just say "this is good" or "this is bad." You must build a bridge between the product's mechanics and the user's reality.
+
+OUTPUT STRUCTURE:
+### 1. The Fit Check
+(A direct, conversational analysis of how the product aligns—or completely clashes—with their stated goals, capital, and timeframe.)
+
+### 2. Scenario Simulation: Day-in-the-Life
+(Paint a realistic picture of what holding this product looks like for them. E.g., "If the market drops 10%, here is exactly what happens to your portfolio," or "In year 3 of this loan, here is what your cash flow looks like.")
+
+### 3. The Hard Truth
+(Highlight the single biggest threat this product poses to this specific user's profile.)
+
+### 4. Fiduciary Verdict
+(Provide a strict "GREEN LIGHT", "YELLOW LIGHT (Proceed with caution/changes)", or "RED LIGHT (Avoid)". Give 2 clear, actionable next steps based on the verdict.)
+"""
+
+from datetime import datetime
 
 # ===========================
-# 6. APP LOGIC
+# 6. APP LOGIC (UPDATED)
 # ===========================
 
 def run_research(product_name):
-    prompt = f"Current Date: December 2025. Investigate rival offers for: {product_name}. Confirm hidden fees."
-    search_query = f"{product_name} financial terms hidden fees reviews 2025"
+    # Dynamically grab the current month and year
+    current_date = datetime.now().strftime("%B %Y")
+    current_year = datetime.now().year
+    
+    prompt = f"""
+    Current Date: {current_date}. 
+    Target Asset/Product: {product_name}.
+    
+    Execute your forensic data gathering mandate. Identify the asset class, extract exact fee structures, uncover regulatory risks, and find 2-3 direct competitors with their metrics. Do not summarize—give me the raw numbers and facts.
+    """
+    
+    # A broadened, dynamic search query designed to catch loans, stocks, OR funds
+    search_query = f"{product_name} current rates OR price hidden fees OR expense ratio regulatory risk competitors {current_year}"
+    
     return call_llm(RESEARCHER_INSTRUCTION, prompt, use_search=True, search_query=search_query)
 
 def generate_report(product_name, research_data):
-    prompt = f"Research Data:\n{research_data}\n\nGenerate Financial Report."
+    prompt = f"""
+    Target Asset/Product: {product_name}
+    
+    Raw Intelligence Data:
+    {research_data}
+    
+    Synthesize this data into the strict CRO Financial Impact & Risk Report. Ensure the Competitive Matrix table is formatted correctly in Markdown and all risks are categorized.
+    """
     return call_llm(EDITOR_INSTRUCTION, prompt)
 
 def generate_personal_rec(product_name, research_data, user_profile):
-    prompt = f"Research Data: {research_data}\nUser Profile: {user_profile}\nGenerate verdict."
+    prompt = f"""
+    Target Asset/Product: {product_name}
+    
+    User Profile / Financial Goal: 
+    {user_profile}
+    
+    Raw Intelligence Data:
+    {research_data}
+    
+    Write the Fiduciary Consultation Letter. Be brutally honest about the risks this specific user faces based on their profile, and provide a definitive Green/Yellow/Red light verdict with actionable next steps.
+    """
     return call_llm(PERSONALIZER_INSTRUCTION, prompt)
 
 # ===========================
